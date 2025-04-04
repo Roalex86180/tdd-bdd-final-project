@@ -27,7 +27,7 @@ import os
 import logging
 import unittest
 from decimal import Decimal
-from service.models import Product, Category, db
+from service.models import Product, Category, db, DataValidationError
 from service import app
 from tests.factories import ProductFactory
 
@@ -37,7 +37,7 @@ DATABASE_URI = os.getenv(
 
 
 ######################################################################
-#  P R O D U C T   M O D E L   T E S T   C A S E S
+#   P R O D U C T   M O D E L   T E S T   C A S E S
 ######################################################################
 # pylint: disable=too-many-public-methods
 class TestProductModel(unittest.TestCase):
@@ -67,19 +67,19 @@ class TestProductModel(unittest.TestCase):
         db.session.remove()
 
     ######################################################################
-    #  T E S T   C A S E S
+    #   T E S T   C A S E S
     ######################################################################
 
     def test_create_a_product(self):
         """It should Create a product and assert that it exists"""
-        product = Product(name="Fedora", description="A red hat", price=12.50, available=True, category=Category.CLOTHS)
+        product = Product(name="Fedora", description="A red hat", price=Decimal("12.50"), available=True, category=Category.CLOTHS)
         self.assertEqual(str(product), "<Product Fedora id=[None]>")
         self.assertTrue(product is not None)
         self.assertEqual(product.id, None)
         self.assertEqual(product.name, "Fedora")
         self.assertEqual(product.description, "A red hat")
         self.assertEqual(product.available, True)
-        self.assertEqual(product.price, 12.50)
+        self.assertEqual(product.price, Decimal("12.50"))
         self.assertEqual(product.category, Category.CLOTHS)
 
     def test_add_a_product(self):
@@ -97,13 +97,10 @@ class TestProductModel(unittest.TestCase):
         new_product = products[0]
         self.assertEqual(new_product.name, product.name)
         self.assertEqual(new_product.description, product.description)
-        self.assertEqual(Decimal(new_product.price), product.price)
+        self.assertEqual(new_product.price, product.price)
         self.assertEqual(new_product.available, product.available)
         self.assertEqual(new_product.category, product.category)
 
-    #
-    # ADD YOUR TEST CASES HERE
-    #
     def test_read_a_product(self):
         """It should Read a Product"""
         product = ProductFactory()
@@ -116,6 +113,11 @@ class TestProductModel(unittest.TestCase):
         self.assertEqual(found_product.name, product.name)
         self.assertEqual(found_product.description, product.description)
         self.assertEqual(found_product.price, product.price)
+
+    def test_find_product_not_found(self):
+        """It should not Find a product that does not exist"""
+        product = Product.find(0)
+        self.assertIsNone(product)
 
     def test_update_a_product(self):
         """It should Update a Product"""
@@ -135,6 +137,12 @@ class TestProductModel(unittest.TestCase):
         self.assertEqual(len(products), 1)
         self.assertEqual(products[0].id, original_id)
         self.assertEqual(products[0].description, "testing")
+
+    def test_update_product_no_id(self):
+        """It should raise a DataValidationError if update is called with no id"""
+        product = ProductFactory()
+        product.id = None
+        self.assertRaises(DataValidationError, product.update)
 
     def test_delete_a_product(self):
         """It should Delete a Product"""
@@ -157,38 +165,76 @@ class TestProductModel(unittest.TestCase):
         products = Product.all()
         self.assertEqual(len(products), 5)
 
+    def test_list_all_products_empty_database(self):
+        """It should return an empty list when the database is empty"""
+        products = Product.all()
+        self.assertEqual(len(products), 0)
+
     def test_find_by_name(self):
         """It should Find a Product by Name"""
         products = ProductFactory.create_batch(5)
         for product in products:
             product.create()
         name = products[0].name
+        found = Product.find_by_name(name).all()  # Execute the query
         count = len([product for product in products if product.name == name])
-        found = Product.find_by_name(name)
-        self.assertEqual(found.count(), count)
+        self.assertEqual(len(found), count)
         for product in found:
             self.assertEqual(product.name, name)
 
-    def test_find_by_availability(self):
-        """It should Find Products by Availability"""
-        products = ProductFactory.create_batch(10)
+    def test_find_by_nonexistent_name(self):
+        """It should return an empty list if no products match the name"""
+        found = Product.find_by_name("Nonexistent Product").all() # Execute the query
+        self.assertEqual(len(found), 0)
+
+    def test_find_by_price(self):
+        """It should Find Products by Price"""
+        products = ProductFactory.create_batch(3)
         for product in products:
             product.create()
-        available = products[0].available
-        count = len([product for product in products if product.available == available])
-        found = Product.find_by_availability(available)
-        self.assertEqual(found.count(), count)
+        price = products[0].price
+        found = Product.find_by_price(price).all() # Execute the query
+        count = len([product for product in products if product.price == price])
+        self.assertEqual(len(found), count)
         for product in found:
-            self.assertEqual(product.available, available)  
+            self.assertEqual(product.price, price)
+
+    def test_find_by_nonexistent_price(self):
+        """It should return an empty list if no products match the price"""
+        found = Product.find_by_price(Decimal("999.99")).all() # Execute the query
+        self.assertEqual(len(found), 0)
+
+    def test_find_by_availability(self):
+        """It should Find Products by Availability"""
+        available_product = ProductFactory(available=True)
+        available_product.create()
+        unavailable_product = ProductFactory(available=False)
+        unavailable_product.create()
+
+        available = Product.find_by_availability(True).all() # Execute the query
+        self.assertEqual(len(available), 1)
+        self.assertEqual(available[0].available, True)
+
+        unavailable = Product.find_by_availability(False).all() # Execute the query
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].available, False)
 
     def test_find_by_category(self):
         """It should Find Products by Category"""
-        products = ProductFactory.create_batch(10)
+        products = ProductFactory.create_batch(3)
         for product in products:
             product.create()
         category = products[0].category
+        found = Product.find_by_category(category).all() # Execute the query
         count = len([product for product in products if product.category == category])
-        found = Product.find_by_category(category)
-        self.assertEqual(found.count(), count)
+        self.assertEqual(len(found), count)
         for product in found:
-            self.assertEqual(product.category, category)   
+            self.assertEqual(product.category, category)
+
+    def test_find_products_by_nonexistent_category(self):
+        """It should return an empty list if no products match the category"""
+        existing_product = ProductFactory(category=Category.CLOTHS)
+        existing_product.create()
+        found = Product.find_by_category(Category.FOOD).all() # Execute the query
+        self.assertEqual(len(found), 0)
+
